@@ -313,8 +313,8 @@ module Templates =
         }  
       ],
       "axes": [
-        {"type": "x", "scale": "x", "offset": 5, "ticks": 5, "title": "X values"},
-        {"type": "y", "scale": "y", "offset": 5, "ticks": 5, "title": "Y values"}
+        {"type": "x", "scale": "x"},
+        {"type": "y", "scale": "y"}
       ],
       "marks": [
         {

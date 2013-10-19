@@ -255,6 +255,91 @@ module Templates =
     }
   ]
 }"""
+    
+    // Generate i random colors - needs improvement
+    let private randomColors i = 
+        let rng = Random(42)
+        [ for i in 0 .. i -> sprintf "\"#%i%i%i\"" (rng.Next(10)) (rng.Next(10)) (rng.Next(10)) ]
+        |> fun a -> System.String.Join (", ", a)
+
+    // Create palette based on # of cases
+    let private paletize<'a,'b when 'b:equality> (data: 'a seq) (categorize: 'a -> 'b)  =
+        let cols = data |> Seq.distinctBy categorize |> Seq.length
+        if cols <= 10 then "\"category10\""
+        elif cols <= 20 then "\"category20\""
+        else sprintf "[%s]" (randomColors cols)
+
+    // Transform dataset to map predefined expected format
+    let private prepareScatter<'a,'b>  (data: 'a seq) 
+                               (fx: 'a -> float) // X coord
+                               (fy: 'a -> float) // Y coord
+                               (fc: 'a -> 'b) // color category
+                               (fs: 'a -> float) = // size
+        data
+        |> Seq.map (fun a -> sprintf """{"x": %f,"y": %f,"c": %A, "s": %f}""" (fx a) (fy a) (fc a) (fs a))
+        |> fun a -> System.String.Join (",", a)
+
+    let private scatterTemplate data fx fy fc fs = 
+        let dataString = prepareScatter data fx fy fc fs
+        let palette = paletize data fc
+        sprintf """
+    {
+      "width": 400,
+      "height": 400,
+      "data": [
+        {
+          "name": "table",
+          "values": [ %s ]
+        }
+      ],
+      "scales": [
+        {
+          "name": "x",
+          "nice": true,
+          "range": "width",
+          "domain": {"data": "table", "field": "data.x"}
+        },
+        {
+          "name": "y",
+          "nice": true,
+          "range": "height",
+          "domain": {"data": "table", "field": "data.y"}
+        },
+        {
+          "name": "c",
+          "type": "ordinal",
+          "domain": {"data": "table", "field": "data.c"},
+          "range": %s
+        }  
+      ],
+      "axes": [
+        {"type": "x", "scale": "x", "offset": 5, "ticks": 5, "title": "X values"},
+        {"type": "y", "scale": "y", "offset": 5, "ticks": 5, "title": "Y values"}
+      ],
+      "marks": [
+        {
+          "type": "symbol",
+          "from": {"data": "table"},
+          "properties": {
+            "enter": {
+              "x": {"scale": "x", "field": "data.x"},
+              "y": {"scale": "y", "field": "data.y"},
+              "fill": {"scale": "c", "field": "data.c"},
+              "size": {"field": "data.s"},
+              "fillOpacity": {"value": 0.5}
+            }
+          }
+        }
+      ]
+    }""" dataString palette
+
+    // older version, directly sending spec as JSON
+    let private sendSpec (spec: string) (hub: IHubContext) : unit =
+        hub.Clients.All?parse spec 
+
+    let scatter data fx fy fc fs = 
+        GlobalHost.ConnectionManager.GetHubContext<WebApp.ChartHub>()
+        |> sendSpec (scatterTemplate data fx fy fc fs)
 
 (**
  * Vega Core

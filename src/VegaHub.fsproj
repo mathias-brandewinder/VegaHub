@@ -54,6 +54,7 @@
     <Content Include="Scripts\app.js" />
     <Compile Include="WebApp.fs" />
     <Compile Include="Vega.fs" />
+    <Compile Include="Funtional.fs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="ImpromptuInterface">

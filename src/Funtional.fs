@@ -122,7 +122,7 @@ module Funtional =
         sprintf """"marks": [ %s ]""" values
 
     (*
-    Example of ScatterPlot
+    Example of ScatterPlot: manual
     *)
 
     type obs = { First:float; Second:float; }
@@ -148,3 +148,28 @@ module Funtional =
             (writeMarks [mark]);]
         |> String.concat ","
         |> fun body -> sprintf "{%s}" body
+
+    (*
+    Example of ScatterPlot: defining a template
+    *)
+
+    let scatterplot dataset (fx, fy) =
+        let xs = "X", fx
+        let ys = "Y", fy
+     
+        let xScale = "X", BuiltIn(Width(xs))
+        let yScale = "Y", BuiltIn(Height(ys))
+
+        let axes = { X = xScale; Y = yScale }
+
+        let mark = Symbol(Enter, (xScale, yScale))
+
+        [
+            """"width": 400, "height": 400""";
+            (writeData dataset [xs;ys;]);
+            (writeScales [xScale;yScale;]);
+            (writeAxes axes);
+            (writeMarks [mark]);]
+        |> String.concat ","
+        |> fun body -> sprintf "{%s}" body
+        

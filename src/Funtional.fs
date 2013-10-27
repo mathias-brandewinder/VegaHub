@@ -73,20 +73,12 @@ module Functional =
             | Height -> Val("range","height")
         let (domain, featType) =
             match feature with
-            | Numeric(n,_)     -> Nested("domain",[Val("data","table");Val("field","data."+n)]), [Val("type","linear")]
-            | Categorical(n,_) -> Nested("domain",[Val("data","table");Val("field","data."+n)]), [Val("type","ordinal")]
+            | Numeric(n,_)     -> Nested("domain",[Val("data","table");Val("field","data."+n)]), Val("type","linear")
+            | Categorical(n,_) -> Nested("domain",[Val("data","table");Val("field","data."+n)]), Val("type","ordinal")
         [   Val("name",name); 
+            featType;
             range; 
             domain; ]
-//        match scale with 
-//        | Width(name,feature) -> 
-//            match feature with
-//            | Numeric(n,_) -> [ Val("name",name); Val("range","width"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
-//            | Categorical(n,_) -> [ Val("name",name); Val("type","ordinal"); Val("range","width"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
-//        | Height(name,feature) -> 
-//            match feature with
-//            | Numeric(n,_) -> [ Val("name",name); Val("range","height"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
-//            | Categorical(n,_) -> [ Val("name",name); Val("type","ordinal"); Val("range","height"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
 
     type Axes<'a> = { XAxis: Scale<'a>; YAxis: Scale<'a> } 
 
@@ -123,27 +115,10 @@ module Functional =
             YScale:Scale<'a>;
             YSide:RectangleSide<'a>;
         }
-
-//    {
-//      "type": "rect",
-//      "from": {"data": "table"},
-//      "properties": {
-//        "enter": {
-//          "x": {"scale": "x", "field": "data.x"},
-//          "width": {"scale": "x", "band": true, "offset": -1},
-//          "y": {"scale": "y", "field": "data.y"},
-//          "y2": {"scale": "y", "value": 0}
-//        },
-//        "update": {
-//          "fill": {"value": "steelblue"}
-//        },
-//        "hover": {
-//          "fill": {"value": "red"}
-//        }
-//      }
-//    }        
+      
     type Mark<'a> = 
         | Symbol of Point<'a>
+        | Rectangle of Rectangle<'a>
 
     let prepareSymbol (point:Point<'a>) =
         let xs = Nested("x", [Val("scale","X");Val(writeSource point.XSource)])
@@ -153,13 +128,20 @@ module Functional =
         let enter = Nested("enter",[xs;ys;color;size;])
         enter
 
-//    let prepareRectangle (rect:Rectangle<'a>) =
-//        let xs = Nested("x", [Val("scale","X");Val(writeSource point.XSource)])
-//        let ys = Nested("y", [Val("scale","Y");Val(writeSource point.YSource)])
-//        let color = Nested("fill",[Val("value","steelblue")])
-//        let size = Nested("size",[Val("value","100")])
-//        let enter = Nested("enter",[xs;ys;color;size;])
-//        enter
+    let prepareRectangle (rect:Rectangle<'a>) =
+        let xs = rect.XSide
+        let x1,x2 = 
+            match xs with
+            | Absolute(x1,x2) -> Nested("x", [Val("scale","X");Val(writeSource x1)]), Nested("x2", [Val("scale","X");Val(writeSource x2)])
+            | Relative(x1,l1) -> Nested("x", [Val("scale","X");Val(writeSource x1)]), Nested("width", [Val("scale","X");Val("band","true");Val("offset","-1")])
+        let ys = rect.YSide
+        let y1,y2 =
+            match ys with
+            | Absolute(y1,y2) -> Nested("y", [Val("scale","Y");Val(writeSource y1)]), Nested("y2", [Val("scale","Y");Val(writeSource y2)])
+            | Relative(y1,l2) -> Nested("y", [Val("scale","Y");Val(writeSource y1)]), Nested("height", [Val("scale","Y");Val("band","true");Val("offset","-1")])
+        let color = Nested("fill",[Val("value","steelblue")])
+        let enter = Nested("enter",[x1;x2;y1;y2;color;])
+        enter
 
     let render mark = 
         match mark with
@@ -167,7 +149,12 @@ module Functional =
             [   Val("type","symbol");
                 Nested("from", [ Val("data","table") ]);
                 Nested("properties", [ prepareSymbol point ])
-            ]        
+            ]    
+        | Rectangle(rect) ->
+            [   Val("type","rect");
+                Nested("from", [ Val("data","table") ]);
+                Nested("properties", [ prepareRectangle rect ])
+            ]               
 
     let writeItem a extractors =
         extractors
@@ -184,10 +171,74 @@ module Functional =
               ] 
             ] ) 
 
+module Basics =
+
+    open Json
+    open Functional
+
+    let scatterplot dataset (fx, fy) =
+
+        let xs = Numeric("fst", fx)
+        let ys = Numeric("snd", fy)
+     
+        let xScale = ("X", Width, xs)
+        let yScale = ("Y",Height, ys)
+
+        let point = 
+            {   XScale = xScale;
+                XSource = Field(xs);
+                YScale = yScale;
+                YSource = Field(ys) }
+
+        let axes = { XAxis = xScale; YAxis = yScale }
+
+        let mark = Symbol(point)
+
+        let template = 
+            [   NVal("width",400.);
+                NVal("height",400.);
+                writeData dataset [xs;ys];
+                List ("scales", [ writeScale xScale; writeScale yScale ]);
+                writeAxes axes;
+                List ("marks", [ render mark ])
+            ]
+
+        writeObj template
+
+    let barplot dataset (fx, fy) =
+
+        let xs = Categorical("fst", fx)
+        let ys = Numeric("snd", fy)
+     
+        let xScale = ("X", Width, xs)
+        let yScale = ("Y", Height, ys)
+
+        let rectangle =
+            {   XSide = Relative(Field(xs), Band);
+                XScale = xScale;
+                YSide = Absolute(NumericValue(0.), Field(ys));
+                YScale = yScale }
+
+        let axes = { XAxis = xScale; YAxis = yScale }
+
+        let mark = Rectangle(rectangle)
+
+        let template = 
+            [   NVal("width",400.);
+                NVal("height",300.);
+                writeData dataset [xs;ys];
+                List ("scales", [ writeScale xScale; writeScale yScale ]);
+                writeAxes axes;
+                List ("marks", [ render mark ])
+            ]
+
+        writeObj template
+
 module Demo =
 
     open Json
     open Functional
+    open Basics
 
     type obs = { First:float; Second:float; Cat:int }
     let rng = System.Random()
@@ -196,64 +247,6 @@ module Demo =
 
     let test () =
                                     
-        let scatterplot dataset (fx, fy) =
+        scatterplot dataset ((fun x -> x.First), (fun x -> x.Second)) |> ignore
 
-            let xs = Numeric("fst", fx)
-            let ys = Numeric("snd", fy)
-     
-            let xScale = ("X", Width, xs)
-            let yScale = ("Y",Height, ys)
-
-            let point = 
-                {   XScale = xScale;
-                    XSource = Field(xs);
-                    YScale = yScale;
-                    YSource = Field(ys) }
-
-            let axes = { XAxis = xScale; YAxis = yScale }
-
-            let mark = Symbol(point)
-
-            let template = 
-                [   NVal("width",400.);
-                    NVal("height",400.);
-                    writeData dataset [xs;ys];
-                    List ("scales", [ writeScale xScale; writeScale yScale ]);
-                    writeAxes axes;
-                    List ("marks", [ render mark ])
-                ]
-
-            writeObj template
-
-        scatterplot dataset ((fun x -> x.First), (fun x -> x.Second))
-
-        let barplot dataset (fx, fy) =
-
-            let xs = Categorical("fst", fx)
-            let ys = Numeric("snd", fy)
-     
-            let xScale = ("X", Width, xs)
-            let yScale = ("Y", Height, ys)
-
-            let point = 
-                {   XScale = xScale;
-                    XSource = Field(xs);
-                    YScale = yScale;
-                    YSource = Field(ys) }
-
-            let axes = { XAxis = xScale; YAxis = yScale }
-
-            let mark = Symbol(point)
-
-            let template = 
-                [   NVal("width",400.);
-                    NVal("height",400.);
-                    writeData dataset [xs;ys];
-                    List ("scales", [ writeScale xScale; writeScale yScale ]);
-                    writeAxes axes;
-                    List ("marks", [ render mark ])
-                ]
-
-            writeObj template
-
-        barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))
+        barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second)) |> ignore

@@ -255,6 +255,6 @@ module Demo =
 
     let test () =
                                     
-        scatterplot dataset ((fun x -> x.First), (fun x -> x.Second)) |> ignore
+        let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second))
 
-        barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second)) |> ignore
+        let bar = barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))

@@ -1,175 +1,169 @@
 ﻿namespace Vega
 
-module Funtional =
+module Json =
 
-    type Feature<'a> = string * ('a -> float)
+    type Obj = Prop list
+    and Prop =
+    | Val of (string * string)
+    | NVal of (string * float)
+    | Nested of string * Obj
+    | List of string * Obj list
 
-    let writeData (data: 'a seq) (feats: Feature<'a> list) =
-        let values = 
-            data 
-            |> Seq.map (fun x -> 
-                feats 
-                |> List.map (fun (n,f) -> sprintf """"%s":%f""" n (f x))
-                |> String.concat ","
-                |> fun item -> sprintf """{%s}""" item)
-            |> String.concat ",\n"
-                
-        sprintf """"data": [
-                      {
-                        "name": "table",
-                        "values": [ %s ]
-                      }
-                    ]""" values
+    let rec writeObj obj =
+        obj 
+        |> List.map writeProp
+        |> String.concat ","
+        |> sprintf "{%s}"            
+    and private writeProp prop =
+        match prop with
+        | Val(key,value)  -> sprintf "\"%s\":\"%s\"" key value
+        | NVal(key,value) -> sprintf "\"%s\":%f" key value
+        | Nested(key,obj) -> sprintf "\"%s\":%s" key (writeObj obj) 
+        | List(key,list)  -> sprintf "\"%s\":[%s]" key (list |> List.map writeObj |> String.concat ",")
+    
+    let test =
+        [   Val("Width","400");
+            NVal("Height",300.0);
+            List("Axes",
+                [   [ Nested("x", [Val("field","data.x")]) ];
+                    [ Nested("y", [Val("field","data.y")]) ];
+                ])
+        ]
+                 
+module Functional = 
 
+    open Json
 
-    type BuiltInScale<'a> =
-        | Width of Feature<'a>
-        | Height of Feature<'a>
-        | Category10 of Feature<'a>
-        | Category20 of Feature<'a>
+    type DataType = 
+        | Numeric
+        | Categorical
 
-    type ScaleDomain<'a> =
-        | Array of float[]
-        | Data of ('a -> float)
+    type Num<'a> = ('a -> float)
+    type Cat<'a> = ('a -> string)
 
-    type ScaleType<'a> = 
-        | BuiltIn of BuiltInScale<'a>
-        | Custom of ScaleDomain<'a>
+    type Feature<'a> = 
+        | Numeric of string * Num<'a>
+        | Categorical of string * Cat<'a>
 
-    type Scale<'a> = string * ScaleType<'a>
-      
-    // should it receive data extractors / Features as input, too?
-    let writeScale (scale:Scale<'a>) =
-        let name, scaleType = scale 
-        match scaleType with
-        | BuiltIn(builtIn) ->
-            match builtIn with
-            | Width(n,f)      -> sprintf """{"name": "%s","range": "width","domain": {"data": "table", "field": "data.%s"}}""" name n
-            | Height(n,f)     -> sprintf """{"name": "%s","range": "height","domain": {"data": "table", "field": "data.%s"}}""" name n
-            | Category10(n,f) -> sprintf """{"name": "%s","range": "category10","domain": {"data": "table", "field": "data.%s"}}""" name n
-            | Category20(n,f) -> sprintf """{"name": "%s","range": "category20","domain": {"data": "table", "field": "data.%s"}}""" name n
-        | _ -> "Not supported"
+    type Datasource<'a> = 
+        | NumericValue of float
+        | CategoricalValue of string
+        | Field of Feature<'a>
 
-    let writeScales (scales:Scale<'a> list) = 
-        let values =
-            scales 
-            |> Seq.map writeScale 
-            |> String.concat ",\n"
-        sprintf """"scales": [ %s ]""" values
+    let writeSource source =
+        match source with
+        | NumericValue(x) -> "value", string x
+        | CategoricalValue(x) -> "value", string x
+        | Field(feature) -> 
+            match feature with
+            | Numeric(name,feat) -> "field", "data." + name
+            | Categorical(name,feat) -> "field", "data." + name
+           
+    type Scale<'a> =
+        | Width of string * Feature<'a>
+        | Height of string * Feature<'a>
 
-    type Axes<'a> = { X: Scale<'a>; Y: Scale<'a> }
+    let writeScale scale = 
+        match scale with 
+        | Width(name,feature) -> 
+            match feature with
+            | Numeric(n,_) -> [ Val("name",name); Val("range","width"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
+            | Categorical(n,_) -> [ Val("name",name); Val("type","ordinal"); Val("range","width"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
+        | Height(name,feature) -> 
+            match feature with
+            | Numeric(n,_) -> [ Val("name",name); Val("range","height"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
+            | Categorical(n,_) -> [ Val("name",name); Val("type","ordinal"); Val("range","height"); Nested("domain",[Val("data","table");Val("field","data."+n)]) ]
+
+    type Axes<'a> = { XAxis: Scale<'a>; YAxis: Scale<'a> } 
 
     let writeAxes axes =
-        let (xName, _) = axes.X
-        let (yName, _) = axes.Y
-        sprintf """ "axes": [ {"type": "x", "scale": "%s"}, {"type": "y", "scale": "%s"}]""" xName yName
+        let x = 
+            match (axes.XAxis) with
+            | Width(name,feature) -> [ Val("type","x"); Val("scale",name) ]
+            | _                   -> failwith "X axis should match width"   
+        let y = 
+            match (axes.YAxis) with
+            | Height(name,feature) -> [ Val("type","y"); Val("scale",name)]
+            | _                    -> failwith "Y axis should match height"   
+        List ("axes", [ x; y ])
 
-    type Point<'a> = Scale<'a> * Scale<'a>
+    type Point<'a> = 
+        {   XScale:Scale<'a>;
+            XSource:Datasource<'a>;
+            YScale:Scale<'a>;
+            YSource:Datasource<'a> }
+        
+    type Mark<'a> = 
+        | Symbol of Point<'a>
 
-    type Property =
-        | Enter
-        | Exit
-        | Update
-        | Hover
+    let prepareSymbol (point:Point<'a>) =
+        let xs = Nested("x", [Val("scale","X");Val(writeSource point.XSource)])
+        let ys = Nested("y", [Val("scale","Y");Val(writeSource point.YSource)])
+        let color = Nested("fill",[Val("value","steelblue")])
+        let size = Nested("size",[Val("value","100")])
+        let enter = Nested("enter",[xs;ys;color;size;])
+        enter
 
-    type Mark<'a> =
-        | Rect
-        | Symbol of (Property * Point<'a>)
-        | Path
-        | Arc
-        | Area
-        | Line
-        | Image
-        | Text
+    let render mark = 
+        match mark with
+        | Symbol(point) -> 
+            [   Val("type","symbol");
+                Nested("from", [ Val("data","table") ]);
+                Nested("properties", [ prepareSymbol point ])
+            ]        
 
-    let writePointProperty (prop:Property, details:Point<'a>) =
-        match prop with
-        | Enter  -> 
-            let (xname, x), (yname, y) = details
-            let (fx,_) =
-                match x with
-                | BuiltIn(scale) ->
-                    match scale with
-                    | Width(f) -> f
-                    | Height(f) -> f
-                    | _ -> failwith "not supported"
-                | _ -> failwith "not supported"
-            let (fy,_) =
-                match y with
-                | BuiltIn(scale) ->
-                    match scale with
-                    | Width(f) -> f
-                    | Height(f) -> f
-                    | _ -> failwith "not supported"
-                | _ -> failwith "not supported"
-            sprintf """"enter": {"x": {"scale": "%s", "field": "data.%s"},"y": {"scale": "%s", "field": "data.%s"},"fill": "steelblue"}""" fx xname fy yname       
-        | Exit   -> failwith "not supported"
-        | Update -> failwith "not supported"
-        | Hover  -> failwith "not supported"
+    let writeItem a extractors =
+        extractors
+        |> List.map (fun ext ->
+            match ext with
+            | Numeric(name,func) -> Val(name,string(func a))
+            | Categorical(name,func) -> Val(name,func a))
+                  
+    let writeData dataset extractors =
+        let name = Val("name","table"); 
+        let values = List("values", dataset |> List.map (fun x -> writeItem x extractors))
+        List("data", [ [ name; values] ] ) 
 
-    let writeMark (mark: Mark<'a>) =
-        match mark with 
-        | Symbol(prop,point) -> 
-            let properties = writePointProperty (prop,point)
-            sprintf """{"type": "symbol","from": {"data": "table"},"properties": {%s}}""" properties
-        | _ -> failwith "Not supported"
+module Demo =
 
-    let writeMarks (marks: Mark<'a> seq) =
-        let values =
-            marks 
-            |> Seq.map writeMark 
-            |> String.concat ",\n"
-        sprintf """"marks": [ %s ]""" values
-
-    (*
-    Example of ScatterPlot: manual
-    *)
+    open Json
+    open Functional
 
     type obs = { First:float; Second:float; }
-    let rng = System.Random()
-    let dataset = [ for i in 1 .. 20 -> { First = rng.NextDouble(); Second = rng.NextDouble() } ]
-        
-    let xs = "X", fun x -> x.First
-    let ys = "Y", fun x -> x.Second
+
+    let test () =
+
+        let rng = System.Random()
+        let dataset = 
+            [ for i in 1 .. 10 -> { First = rng.NextDouble(); Second = rng.NextDouble() } ]
+                                     
+        let scatterplot dataset (fx, fy) =
+
+            let xs = Numeric("fst", fx)
+            let ys = Numeric("snd", fy)
      
-    let xScale = "X", BuiltIn(Width(xs))
-    let yScale = "Y", BuiltIn(Height(ys))
+            let xScale = Width ("X", xs)
+            let yScale = Height ("Y", ys)
 
-    let axes = { X = xScale; Y = yScale }
+            let point = 
+                {   XScale = xScale;
+                    XSource = Field(xs);
+                    YScale = yScale;
+                    YSource = Field(ys) }
 
-    let mark = Symbol(Enter, (xScale, yScale))
+            let axes = { XAxis = xScale; YAxis = yScale }
 
-    let chart = 
-        [
-            """"width": 400, "height": 400""";
-            (writeData dataset [xs;ys;]);
-            (writeScales [xScale;yScale;]);
-            (writeAxes axes);
-            (writeMarks [mark]);]
-        |> String.concat ","
-        |> fun body -> sprintf "{%s}" body
+            let mark = Symbol(point)
 
-    (*
-    Example of ScatterPlot: defining a template
-    *)
+            let template = 
+                [   NVal("width",400.);
+                    NVal("height",400.);
+                    writeData dataset [xs;ys];
+                    List ("scales", [ writeScale xScale; writeScale yScale ]);
+                    writeAxes axes;
+                    List ("marks", [ render mark ])
+                ]
 
-    let scatterplot dataset (fx, fy) =
-        let xs = "X", fx
-        let ys = "Y", fy
-     
-        let xScale = "X", BuiltIn(Width(xs))
-        let yScale = "Y", BuiltIn(Height(ys))
+            writeObj template
 
-        let axes = { X = xScale; Y = yScale }
-
-        let mark = Symbol(Enter, (xScale, yScale))
-
-        [
-            """"width": 400, "height": 400""";
-            (writeData dataset [xs;ys;]);
-            (writeScales [xScale;yScale;]);
-            (writeAxes axes);
-            (writeMarks [mark]);]
-        |> String.concat ","
-        |> fun body -> sprintf "{%s}" body
-        
+        scatterplot dataset ((fun x -> x.First), (fun x -> x.Second))

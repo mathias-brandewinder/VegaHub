@@ -65,6 +65,10 @@ module Functional =
                    
     type Scale<'a> = string * ScaleType * Feature<'a>
 
+    let private scaleName (scale:Scale<'a>) = 
+        let (name,_,_) = scale
+        name
+
     let writeScale (scale:Scale<'a>) = 
         let name, scaleType, feature = scale
         let range =
@@ -121,24 +125,28 @@ module Functional =
         | Rectangle of Rectangle<'a>
 
     let prepareSymbol (point:Point<'a>) =
-        let xs = Nested("x", [Val("scale","X");Val(writeSource point.XSource)])
-        let ys = Nested("y", [Val("scale","Y");Val(writeSource point.YSource)])
+        let xName = scaleName point.XScale
+        let yName = scaleName point.YScale
+        let xs = Nested("x", [Val("scale",xName);Val(writeSource point.XSource)])
+        let ys = Nested("y", [Val("scale",yName);Val(writeSource point.YSource)])
         let color = Nested("fill",[Val("value","steelblue")])
         let size = Nested("size",[Val("value","100")])
         let enter = Nested("enter",[xs;ys;color;size;])
         enter
 
     let prepareRectangle (rect:Rectangle<'a>) =
+        let xName = scaleName rect.XScale
+        let yName = scaleName rect.YScale
         let xs = rect.XSide
         let x1,x2 = 
             match xs with
-            | Absolute(x1,x2) -> Nested("x", [Val("scale","X");Val(writeSource x1)]), Nested("x2", [Val("scale","X");Val(writeSource x2)])
-            | Relative(x1,l1) -> Nested("x", [Val("scale","X");Val(writeSource x1)]), Nested("width", [Val("scale","X");Val("band","true");Val("offset","-1")])
+            | Absolute(x1,x2) -> Nested("x", [Val("scale",xName);Val(writeSource x1)]), Nested("x2", [Val("scale",xName);Val(writeSource x2)])
+            | Relative(x1,l1) -> Nested("x", [Val("scale",xName);Val(writeSource x1)]), Nested("width", [Val("scale",xName);Val("band","true");Val("offset","-1")])
         let ys = rect.YSide
         let y1,y2 =
             match ys with
-            | Absolute(y1,y2) -> Nested("y", [Val("scale","Y");Val(writeSource y1)]), Nested("y2", [Val("scale","Y");Val(writeSource y2)])
-            | Relative(y1,l2) -> Nested("y", [Val("scale","Y");Val(writeSource y1)]), Nested("height", [Val("scale","Y");Val("band","true");Val("offset","-1")])
+            | Absolute(y1,y2) -> Nested("y", [Val("scale",yName);Val(writeSource y1)]), Nested("y2", [Val("scale",yName);Val(writeSource y2)])
+            | Relative(y1,l2) -> Nested("y", [Val("scale",yName);Val(writeSource y1)]), Nested("height", [Val("scale",yName);Val("band","true");Val("offset","-1")])
         let color = Nested("fill",[Val("value","steelblue")])
         let enter = Nested("enter",[x1;x2;y1;y2;color;])
         enter
@@ -182,7 +190,7 @@ module Basics =
         let ys = Numeric("snd", fy)
      
         let xScale = ("X", Width, xs)
-        let yScale = ("Y",Height, ys)
+        let yScale = ("Y", Height, ys)
 
         let point = 
             {   XScale = xScale;

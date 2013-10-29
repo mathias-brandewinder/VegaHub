@@ -59,24 +59,29 @@ module Functional =
             | Numeric(name,feat) -> "field", "data." + name
             | Categorical(name,feat) -> "field", "data." + name
 
-    type ScaleType =
+    type Range =
         | Width
         | Height
-                   
-    type Scale<'a> = string * ScaleType * Feature<'a>
+        | Color10
+        | Color20
+//        | Array of string list
+                               
+    type Scale<'a> = string * Range * Feature<'a> // Feature == Domain ?
 
     let private scaleName (scale:Scale<'a>) = 
         let (name,_,_) = scale
         name
 
     let writeScale (scale:Scale<'a>) = 
-        let name, scaleType, feature = scale
+        let name, range, domain = scale
         let range =
-            match scaleType with
+            match range with
             | Width -> Val("range","width")
             | Height -> Val("range","height")
+            | Color10 -> Val("range","color10")
+            | Color20 -> Val("range","color20")
         let (domain, featType) =
-            match feature with
+            match domain with
             | Numeric(n,_)     -> Nested("domain",[Val("data","table");Val("field","data."+n)]), Val("type","linear")
             | Categorical(n,_) -> Nested("domain",[Val("data","table");Val("field","data."+n)]), Val("type","ordinal")
         [   Val("name",name); 
@@ -184,13 +189,15 @@ module Basics =
     open Json
     open Functional
 
-    let scatterplot dataset (fx, fy) =
+    let scatterplot dataset (fx, fy, fc) =
 
         let xs = Numeric("fst", fx)
         let ys = Numeric("snd", fy)
-     
+        let cs = Categorical("col", fc)
+
         let xScale = ("X", Width, xs)
         let yScale = ("Y", Height, ys)
+        let colorScale = ("Color", Color10, cs)
 
         let point = 
             {   XScale = xScale;
@@ -206,7 +213,7 @@ module Basics =
             [   NVal("width",400.);
                 NVal("height",400.);
                 writeData dataset [xs;ys];
-                List ("scales", [ writeScale xScale; writeScale yScale ]);
+                List ("scales", [ writeScale xScale; writeScale yScale; writeScale colorScale; ]);
                 writeAxes axes;
                 List ("marks", [ render mark ])
             ]
@@ -252,9 +259,9 @@ module Demo =
     let rng = System.Random()
     let dataset = 
         [ for i in 1 .. 10 -> { First = rng.NextDouble(); Second = rng.NextDouble(); Cat = i } ]
+                                  
+    let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second))
 
-    let test () =
-                                    
-        let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second))
+    let bar = barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))
 
-        let bar = barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))
+    ignore ()

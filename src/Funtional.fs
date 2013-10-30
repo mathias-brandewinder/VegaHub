@@ -45,6 +45,11 @@ module Functional =
         | Numeric of string * Num<'a>
         | Categorical of string * Cat<'a>
 
+    let featureName f = 
+        match f with
+        | Numeric(n,_) -> n
+        | Categorical(n,_) -> n
+
     type Datasource<'a> = 
         | NumericValue of float
         | CategoricalValue of string
@@ -78,8 +83,8 @@ module Functional =
             match range with
             | Width -> Val("range","width")
             | Height -> Val("range","height")
-            | Color10 -> Val("range","color10")
-            | Color20 -> Val("range","color20")
+            | Color10 -> Val("range","category10")
+            | Color20 -> Val("range","category20")
         let (domain, featType) =
             match domain with
             | Numeric(n,_)     -> Nested("domain",[Val("data","table");Val("field","data."+n)]), Val("type","linear")
@@ -124,17 +129,35 @@ module Functional =
             YScale:Scale<'a>;
             YSide:RectangleSide<'a>;
         }
-      
-    type Mark<'a> = 
-        | Symbol of Point<'a>
-        | Rectangle of Rectangle<'a>
+    
+    type Color<'a> = 
+        | Fixed of string // should enforce "color" string
+        | Dynamic of Scale<'a> * Feature<'a> // should enforce categorical?
 
-    let prepareSymbol (point:Point<'a>) =
+    let writeColor c =
+        match c with 
+        | Fixed(color) -> [Val("value",color)]
+        | Dynamic(scale,feature) -> 
+            let scalename = scaleName scale
+            let fieldname = featureName feature
+            [Val("scale",scalename);Val("field","data."+fieldname)]
+
+    type SymbolDecoration<'a> = {
+        Fill: Color<'a> }
+ 
+    type Mark<'a> = 
+        | Symbol of Point<'a> * SymbolDecoration<'a>
+        | Rectangle of Rectangle<'a>
+        | Text of Point<'a> * Datasource<'a>
+
+    let prepareSymbol (point:Point<'a>, decoration:SymbolDecoration<'a>) =
         let xName = scaleName point.XScale
         let yName = scaleName point.YScale
+        let c = decoration.Fill
+
         let xs = Nested("x", [Val("scale",xName);Val(writeSource point.XSource)])
         let ys = Nested("y", [Val("scale",yName);Val(writeSource point.YSource)])
-        let color = Nested("fill",[Val("value","steelblue")])
+        let color = Nested("fill",writeColor c)
         let size = Nested("size",[Val("value","100")])
         let enter = Nested("enter",[xs;ys;color;size;])
         enter
@@ -156,18 +179,39 @@ module Functional =
         let enter = Nested("enter",[x1;x2;y1;y2;color;])
         enter
 
+    let prepareText (point:Point<'a>, text:Datasource<'a>) =
+        let xName = scaleName point.XScale
+        let yName = scaleName point.YScale
+        let c = Fixed("steelblue")
+        let t = 
+            match text with
+            | NumericValue(f) -> [Val("value",string f)]
+            | CategoricalValue(f) -> [Val("value",f)]
+            | Field (f) -> [Val("field",featureName f)]
+        let xs = Nested("x", [Val("scale",xName);Val(writeSource point.XSource)])
+        let ys = Nested("y", [Val("scale",yName);Val(writeSource point.YSource)])
+        let txt = Nested("text",t)
+        let color = Nested("fill",writeColor c)
+        let enter = Nested("enter",[xs;ys;color;txt;])
+        enter
+
     let render mark = 
         match mark with
-        | Symbol(point) -> 
+        | Symbol(point,decoration) -> 
             [   Val("type","symbol");
                 Nested("from", [ Val("data","table") ]);
-                Nested("properties", [ prepareSymbol point ])
+                Nested("properties", [ prepareSymbol (point,decoration) ])
             ]    
         | Rectangle(rect) ->
             [   Val("type","rect");
                 Nested("from", [ Val("data","table") ]);
                 Nested("properties", [ prepareRectangle rect ])
-            ]               
+            ]             
+        | Text(point,text) ->
+            [   Val("type","text");
+                Nested("from", [ Val("data","table") ]);
+                Nested("properties", [ prepareText (point,text) ])
+            ]             
 
     let writeItem a extractors =
         extractors
@@ -204,18 +248,21 @@ module Basics =
                 XSource = Field(xs);
                 YScale = yScale;
                 YSource = Field(ys) }
+        let decoration = { Fill = Dynamic(colorScale,cs) }
 
         let axes = { XAxis = xScale; YAxis = yScale }
 
-        let mark = Symbol(point)
+        let mark = Symbol(point,decoration)
+
+        let testText = Text(point,CategoricalValue("HELLO"))
 
         let template = 
             [   NVal("width",400.);
                 NVal("height",400.);
-                writeData dataset [xs;ys];
+                writeData dataset [xs;ys;cs];
                 List ("scales", [ writeScale xScale; writeScale yScale; writeScale colorScale; ]);
                 writeAxes axes;
-                List ("marks", [ render mark ])
+                List ("marks", [ render mark; render testText ])
             ]
 
         writeObj template
@@ -258,9 +305,9 @@ module Demo =
     type obs = { First:float; Second:float; Cat:int }
     let rng = System.Random()
     let dataset = 
-        [ for i in 1 .. 10 -> { First = rng.NextDouble(); Second = rng.NextDouble(); Cat = i } ]
+        [ for i in 1 .. 10 -> { First = rng.NextDouble(); Second = rng.NextDouble(); Cat = rng.Next(3) } ]
                                   
-    let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second))
+    let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second), (fun x -> x.Cat |> string))
 
     let bar = barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))
 

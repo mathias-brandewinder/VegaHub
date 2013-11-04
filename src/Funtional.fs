@@ -4,10 +4,11 @@ module Json =
 
     type Obj = Prop list
     and Prop =
-    | Val of (string * string)
-    | NVal of (string * float)
-    | Nested of string * Obj
-    | List of string * Obj list
+    | Val of (string * string) // string property
+    | NVal of (string * float) // numeric property
+    | Nested of (string * Obj) // object property
+    | List of (string * Obj list) // list of objects
+    | VList of (string * string list) // raw list of strings
 
     let rec writeObj obj =
         obj 
@@ -20,14 +21,15 @@ module Json =
         | NVal(key,value) -> sprintf "\"%s\":%f" key value
         | Nested(key,obj) -> sprintf "\"%s\":%s" key (writeObj obj) 
         | List(key,list)  -> sprintf "\"%s\":[%s]" key (list |> List.map writeObj |> String.concat ",")
-    
+        | VList(key,list) -> sprintf "\"%s\":[%s]" key (list |> List.map (fun x -> sprintf "\"%s\"" x) |> String.concat ",")
     let test =
         [   Val("Width","400");
             NVal("Height",300.0);
             List("Axes",
                 [   [ Nested("x", [Val("field","data.x")]) ];
                     [ Nested("y", [Val("field","data.y")]) ];
-                ])
+                ]);
+            VList("Raw",["A";"B";"C"]);
         ]
                  
 module Functional = 
@@ -94,18 +96,27 @@ module Functional =
             range; 
             domain; ]
 
-    type Axes<'a> = { XAxis: Scale<'a>; YAxis: Scale<'a> } 
+    type AxisValues = string list
+    type Axes<'a> = { XAxis: Scale<'a> * AxisValues option; YAxis: Scale<'a> * AxisValues option} 
 
     let writeAxes axes =
         let x = 
-            let name,scaleType,feature = axes.XAxis //string * ScaleType * Feature<'a>
+            let (name,scaleType,feature),values = axes.XAxis
             match scaleType with
-            | Width -> [ Val("type","x"); Val("scale",name) ]
+            | Width -> 
+                let basic = [ Val("type","x"); Val("scale",name); ]
+                match values with
+                | None -> basic
+                | Some(v) -> List.append basic [VList("values",v)]
             | _     -> failwith "X axis should match width"   
         let y = 
-            let name,scaleType,feature = axes.YAxis //string * ScaleType * Feature<'a>
+            let (name,scaleType,feature),values = axes.YAxis
             match scaleType with
-            | Height -> [ Val("type","y"); Val("scale",name)]
+            | Height -> 
+                let basic = [ Val("type","y"); Val("scale",name); ]
+                match values with
+                | None -> basic
+                | Some(v) -> List.append basic [VList("values",v)]
             | _      -> failwith "Y axis should match height"   
         List ("axes", [ x; y ])
 
@@ -142,15 +153,16 @@ module Functional =
             let fieldname = featureName feature
             [Val("scale",scalename);Val("field","data."+fieldname)]
 
-    type SymbolDecoration<'a> = {
+    type SharedDecoration<'a> = {
         Fill: Color<'a> }
  
     type Mark<'a> = 
-        | Symbol of Point<'a> * SymbolDecoration<'a>
-        | Rectangle of Rectangle<'a>
+        | Symbol of Point<'a> * SharedDecoration<'a>
+        | Rectangle of Rectangle<'a> * SharedDecoration<'a>
         | Text of Point<'a> * Datasource<'a>
 
-    let prepareSymbol (point:Point<'a>, decoration:SymbolDecoration<'a>) =
+    let prepareSymbol (point:Point<'a>, decoration:SharedDecoration<'a>) =
+
         let xName = scaleName point.XScale
         let yName = scaleName point.YScale
         let c = decoration.Fill
@@ -162,9 +174,12 @@ module Functional =
         let enter = Nested("enter",[xs;ys;color;size;])
         enter
 
-    let prepareRectangle (rect:Rectangle<'a>) =
+    let prepareRectangle (rect:Rectangle<'a>, decoration:SharedDecoration<'a>) =
+
         let xName = scaleName rect.XScale
         let yName = scaleName rect.YScale
+        let c = decoration.Fill
+
         let xs = rect.XSide
         let x1,x2 = 
             match xs with
@@ -175,14 +190,17 @@ module Functional =
             match ys with
             | Absolute(y1,y2) -> Nested("y", [Val("scale",yName);Val(writeSource y1)]), Nested("y2", [Val("scale",yName);Val(writeSource y2)])
             | Relative(y1,l2) -> Nested("y", [Val("scale",yName);Val(writeSource y1)]), Nested("height", [Val("scale",yName);Val("band","true");Val("offset","-1")])
-        let color = Nested("fill",[Val("value","steelblue")])
-        let enter = Nested("enter",[x1;x2;y1;y2;color;])
+        let color = Nested("fill", writeColor c)
+        let enter = Nested("enter", [x1;x2;y1;y2;color;])
+
         enter
 
     let prepareText (point:Point<'a>, text:Datasource<'a>) =
+
         let xName = scaleName point.XScale
         let yName = scaleName point.YScale
-        let c = Fixed("steelblue")
+        let c = Fixed("black")
+
         let t = 
             match text with
             | NumericValue(f) -> [Val("value",string f)]
@@ -200,12 +218,12 @@ module Functional =
         | Symbol(point,decoration) -> 
             [   Val("type","symbol");
                 Nested("from", [ Val("data","table") ]);
-                Nested("properties", [ prepareSymbol (point,decoration) ])
+                Nested("properties", [ prepareSymbol (point, decoration) ])
             ]    
-        | Rectangle(rect) ->
+        | Rectangle(rect,decoration) ->
             [   Val("type","rect");
                 Nested("from", [ Val("data","table") ]);
-                Nested("properties", [ prepareRectangle rect ])
+                Nested("properties", [ prepareRectangle (rect, decoration) ])
             ]             
         | Text(point,text) ->
             [   Val("type","text");
@@ -248,9 +266,10 @@ module Basics =
                 XSource = Field(xs);
                 YScale = yScale;
                 YSource = Field(ys) }
+
         let decoration = { Fill = Dynamic(colorScale,cs) }
 
-        let axes = { XAxis = xScale; YAxis = yScale }
+        let axes = { XAxis = xScale, None; YAxis = yScale, None}
 
         let mark = Symbol(point,decoration)
 
@@ -275,21 +294,61 @@ module Basics =
         let xScale = ("X", Width, xs)
         let yScale = ("Y", Height, ys)
 
+        let axes = { XAxis = xScale, None; YAxis = yScale, None }
+
         let rectangle =
             {   XSide = Relative(Field(xs), Band);
                 XScale = xScale;
                 YSide = Absolute(NumericValue(0.), Field(ys));
                 YScale = yScale }
+        let decoration = { Fill = Fixed("red") }
 
-        let axes = { XAxis = xScale; YAxis = yScale }
-
-        let mark = Rectangle(rectangle)
+        let mark = Rectangle(rectangle, decoration)
 
         let template = 
             [   NVal("width",400.);
                 NVal("height",300.);
                 writeData dataset [xs;ys];
                 List ("scales", [ writeScale xScale; writeScale yScale ]);
+                writeAxes axes;
+                List ("marks", [ render mark ])
+            ]
+
+        writeObj template
+
+    let coloredBar dataset (fx, fy) fc =
+
+        let xs = Categorical("fst", fx)
+        let ys = Numeric("snd", fy)
+        let cs = Categorical("col", fc)
+
+        let xScale = ("X", Width, xs)
+        let yScale = ("Y", Height, ys)
+        let colorScale = ("Color", Color20, cs)
+
+        let rectangle =
+            {   XSide = Relative(Field(xs), Band);
+                XScale = xScale;
+                YSide = Absolute(NumericValue(0.), Field(ys));
+                YScale = yScale }
+        let decoration = { Fill = Dynamic(colorScale,cs) }
+        let mark = Rectangle(rectangle, decoration)
+
+        let axesValues = 
+            let len = List.length dataset
+            if len > 10
+            then 
+                let interval = len / 5
+                let vs = dataset |> List.map fx
+                Some([ for i in 0 .. (len - 1) do if (i % interval = 0) then yield vs.[i] ])
+            else None
+        let axes = { XAxis = xScale, axesValues; YAxis = yScale, None }
+
+        let template = 
+            [   NVal("width",400.);
+                NVal("height",300.);
+                writeData dataset [xs;ys;cs];
+                List ("scales", [ writeScale xScale; writeScale yScale; writeScale colorScale ]);
                 writeAxes axes;
                 List ("marks", [ render mark ])
             ]
@@ -310,5 +369,11 @@ module Demo =
     let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second), (fun x -> x.Cat |> string))
 
     let bar = barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))
+
+    type Pres = { Year:int; Debt:float; Pres:string }
+    let test = 
+        [ for i in 1950 .. 2010 -> { Year = i; Debt = rng.NextDouble(); Pres = if i < 1960 then "Alpha" elif i < 1980 then "Bravo" else "Charlie" } ]
+
+    let debt = coloredBar test ((fun x -> x.Year |> string), (fun x -> x.Debt)) (fun x -> x.Pres)
 
     ignore ()

@@ -349,6 +349,7 @@ module Basics =
                 NVal("height",300.);
                 writeData dataset [xs;ys;cs];
                 List ("scales", [ writeScale xScale; writeScale yScale; writeScale colorScale ]);
+                List ("legends", [ [Val("fill","Color")] ])
                 writeAxes axes;
                 List ("marks", [ render mark ])
             ]

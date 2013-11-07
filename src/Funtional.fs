@@ -155,13 +155,16 @@ module Functional =
 
     type SharedDecoration<'a> = {
         Fill: Color<'a> }
- 
+
+    type PointDecoration<'a> = {
+        Size: Datasource<'a> }
+         
     type Mark<'a> = 
-        | Symbol of Point<'a> * SharedDecoration<'a>
+        | Symbol of Point<'a> * SharedDecoration<'a> * PointDecoration<'a>
         | Rectangle of Rectangle<'a> * SharedDecoration<'a>
         | Text of Point<'a> * Datasource<'a>
 
-    let prepareSymbol (point:Point<'a>, decoration:SharedDecoration<'a>) =
+    let prepareSymbol (point:Point<'a>, decoration:SharedDecoration<'a>, pointDecoration:PointDecoration<'a>) =
 
         let xName = scaleName point.XScale
         let yName = scaleName point.YScale
@@ -170,7 +173,7 @@ module Functional =
         let xs = Nested("x", [Val("scale",xName);Val(writeSource point.XSource)])
         let ys = Nested("y", [Val("scale",yName);Val(writeSource point.YSource)])
         let color = Nested("fill",writeColor c)
-        let size = Nested("size",[Val("value","100")])
+        let size = Nested("size",[Val(writeSource pointDecoration.Size)])
         let enter = Nested("enter",[xs;ys;color;size;])
         enter
 
@@ -215,10 +218,10 @@ module Functional =
 
     let render mark = 
         match mark with
-        | Symbol(point,decoration) -> 
+        | Symbol(point,decoration,pointDecoration) -> 
             [   Val("type","symbol");
                 Nested("from", [ Val("data","table") ]);
-                Nested("properties", [ prepareSymbol (point, decoration) ])
+                Nested("properties", [ prepareSymbol (point, decoration, pointDecoration) ])
             ]    
         | Rectangle(rect,decoration) ->
             [   Val("type","rect");
@@ -251,15 +254,18 @@ module Basics =
     open Json
     open Functional
 
-    let scatterplot dataset (fx, fy, fc) =
+    let scatterplot dataset (fx, fy, fc, fs) =
 
         let xs = Numeric("fst", fx)
         let ys = Numeric("snd", fy)
         let cs = Categorical("col", fc)
+        let ss = Numeric("size", fs)
 
         let xScale = ("X", Width, xs)
         let yScale = ("Y", Height, ys)
         let colorScale = ("Color", Color10, cs)
+
+        let axes = { XAxis = xScale, None; YAxis = yScale, None}
 
         let point = 
             {   XScale = xScale;
@@ -268,20 +274,16 @@ module Basics =
                 YSource = Field(ys) }
 
         let decoration = { Fill = Dynamic(colorScale,cs) }
-
-        let axes = { XAxis = xScale, None; YAxis = yScale, None}
-
-        let mark = Symbol(point,decoration)
-
-        let testText = Text(point,CategoricalValue("HELLO"))
+        let pointDecoration = { Size = Field(ss) }
+        let mark = Symbol(point,decoration,pointDecoration)
 
         let template = 
             [   NVal("width",400.);
                 NVal("height",400.);
-                writeData dataset [xs;ys;cs];
+                writeData dataset [xs;ys;cs;ss];
                 List ("scales", [ writeScale xScale; writeScale yScale; writeScale colorScale; ]);
                 writeAxes axes;
-                List ("marks", [ render mark; render testText ])
+                List ("marks", [ render mark; ])
             ]
 
         writeObj template
@@ -367,7 +369,7 @@ module Demo =
     let dataset = 
         [ for i in 1 .. 10 -> { First = rng.NextDouble(); Second = rng.NextDouble(); Cat = rng.Next(3) } ]
                                   
-    let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second), (fun x -> x.Cat |> string))
+    let plot = scatterplot dataset ((fun x -> x.First), (fun x -> x.Second), (fun x -> x.Cat |> string), (fun x -> if x.Cat = 0 then 250. else 100.))
 
     let bar = barplot dataset ((fun x -> x.Cat |> string), (fun x -> x.Second))
 

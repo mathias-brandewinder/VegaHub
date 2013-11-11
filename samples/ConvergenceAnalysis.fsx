@@ -20,35 +20,58 @@ open System
 
 let rng = Random()
 
-//type Est = { Real:float;Pred:float;Obs:int;Group:string }
+type Est = { Real:float; Pred:float; Obs:int; Group:string }
 
-let fakeAlgo iters (handler: (float*float) -> unit) =
+type DataPoint = { Prints: int; Clicks: int; Tokens: bool [] } 
 
-    let theta = [| 0.; 0.; 0.; |]
-    let rec update theta i p =
+let ctr p = float p.Clicks / float p.Prints
+
+let features = 10
+let sampleSize = 99
+
+let dataset =
+    [| for i in 0..sampleSize -> 
+        let p = rng.Next(1000)
+        { Prints = p; 
+          Clicks = p / rng.Next(2,10); 
+          Tokens = [| for f in 1 .. features -> if rng.Next(2) = 1 then true else false |] } |]
+
+let trainingset = dataset.[0..sampleSize / 2]
+let validationset = dataset.[1+sampleSize / 2 ..]
+ 
+let fakeAlgo dataset iters (handler: float [] -> unit) =
+    let theta = [| for f in 1 .. features -> 0. |]
+    let rec update theta i =
         if i > iters 
-        then "Done"
+        then theta
         else
-            let prev' = p * (0.8 + 0.2 * rng.NextDouble())
-            let upd = i |> float, prev'
-            upd |> handler
-            let theta' = [| rng.NextDouble(); rng.NextDouble(); rng.NextDouble() |]
-            update theta' (i+1) prev'
+            let theta' = theta |> Array.map (fun x -> x + 0.01 * (rng.NextDouble() - 0.5))
+            theta' |> handler
+            update theta' (i+1)
 
-    let prev = 1.
-    update theta 0 prev
-
+    update theta 0
 
             
 let disposable = Vega.connect "http://localhost:8081"
 
-let mutable history = [| (0.,0.) ; |]
+let fullset = [|
+    for t in trainingset -> (t,0)
+    for v in validationset -> (v,1) |]
+
+type Point = { X: float; Y: float; C: string; S: float }
+
+let pred (theta: float[]) x =
+    (theta, x) ||> Array.map2 (fun x y -> x * y) |> Array.sum
 
 let handleUpdate update =
-        history <- Array.append history [| update |]    
-        VegaHub.Templates.scatter history (fun x -> fst x) (fun x -> snd x) (fun x -> "Color") (fun x -> 120.) 
+    let f = pred update
+    let plot = 
+        fullset 
+        |> Array.map (fun (x,i) -> 
+            { X = ctr x; Y = f (x.Tokens |> Array.map (fun z -> if z then 1. else 0.)); C = i |> string; S = x.Prints |> float})
+    VegaHub.Templates.scatter plot (fun x -> x.X) (fun x -> x.Y) (fun x -> x.C) (fun x -> x.S) 
 
 
-fakeAlgo 100 handleUpdate 
+fakeAlgo trainingset 1000 handleUpdate 
 
 disposable.Dispose()

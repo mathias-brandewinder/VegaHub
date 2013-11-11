@@ -370,7 +370,9 @@ module Basics =
 
         writeObj template
 
-    let force nodes (ns) edges (src,tgt,v) =
+    let force nodes (ns) edges (src,tgt,v) (args:(float*float*int)) =
+        
+        let dist,chrg,itrs = args 
 
         let nodeName = Categorical("name", ns)
 
@@ -410,7 +412,7 @@ module Basics =
                       [ 
                         Val("name","nodes"); 
                         List("values", nodes |> List.map (fun x -> writeItem x nodeExtractors));
-                        List("transform", [ [ Val("type","force"); Val("links","edges"); NVal("linkDistance",50.); NVal("charge",-50.); NVal("iterations",1000.) ] ]);
+                        List("transform", [ [ Val("type","force"); Val("links","edges"); NVal("linkDistance",dist); NVal("charge",chrg); NVal("iterations",itrs |> float) ] ]);
                       ]; 
                     ])
                 List ("marks", [ render connections; bubbles ])
@@ -455,6 +457,6 @@ module Demo =
             { From=1; To=3; Value= 5};
             { From=2; To=3; Value= 5}; ]
 
-    let graph = force nodes (fun x -> x.Name) edges ((fun x -> x.From |> float), (fun x -> x.To |> float), (fun x -> x.Value |> float))
+    let graph = force nodes (fun x -> x.Name) edges ((fun x -> x.From |> float), (fun x -> x.To |> float), (fun x -> x.Value |> float)) (50.,-100.,100)
 
     ignore ()

@@ -163,6 +163,7 @@ module Functional =
         | Symbol of Point<'a> * SharedDecoration<'a> * PointDecoration<'a>
         | Rectangle of Rectangle<'a> * SharedDecoration<'a>
         | Text of Point<'a> * Datasource<'a>
+        | Path
 
     let prepareSymbol (point:Point<'a>, decoration:SharedDecoration<'a>, pointDecoration:PointDecoration<'a>) =
 
@@ -216,6 +217,12 @@ module Functional =
         let enter = Nested("enter",[xs;ys;color;txt;])
         enter
 
+    let preparePath = 
+        let path = Nested("path",[Val("field","path")])
+        let stroke = Nested("stroke",[Val("value","#ccc")])
+        let width = Nested("strokeWidth",[NVal("value",1.0)])
+        Nested("update",[path;stroke;width])
+
     let render mark = 
         match mark with
         | Symbol(point,decoration,pointDecoration) -> 
@@ -232,13 +239,18 @@ module Functional =
             [   Val("type","text");
                 Nested("from", [ Val("data","table") ]);
                 Nested("properties", [ prepareText (point,text) ])
-            ]             
+            ]         
+        | Path ->    
+            [   Val("type","path");
+                Nested("from", [ Val("data","edges"); List("transform", [ [Val("type","link");Val("shape","line")]]); ]);               
+                Nested("properties", [ preparePath ])
+            ]         
 
     let writeItem a extractors =
         extractors
         |> List.map (fun ext ->
             match ext with
-            | Numeric(name,func) -> Val(name,string(func a))
+            | Numeric(name,func) -> NVal(name,func a)
             | Categorical(name,func) -> Val(name,func a))
                   
     let writeData dataset extractors =
@@ -358,6 +370,54 @@ module Basics =
 
         writeObj template
 
+    let force nodes (ns) edges (src,tgt,v) =
+
+        let nodeName = Categorical("name", ns)
+
+        let nodeExtractors = [ nodeName ]
+
+        let edgeSource = Numeric("source", src)
+        let edgeTarget = Numeric("target", tgt)
+        let edgeValue = Numeric("value", v)
+
+        let edgeExtractors = [edgeSource; edgeTarget; edgeValue]
+
+        let connections = Path
+        let bubbles = 
+            [   Val("type","symbol");
+                Nested("from", [ Val("data","nodes") ]);
+                Nested("properties", 
+                    [   Nested("enter",
+                            [   Nested("x",[Val("field","x")]);
+                                Nested("y",[Val("field","y")]);
+                                Nested("fill",[Val("value","steelblue")]);
+                                Nested("fillOpacity",[NVal("value",0.2)]);
+                                Nested("stroke",[Val("value","steelblue")]);
+                            ])
+                            
+                    ])
+            ]
+
+        let template = 
+            [   NVal("width",400.);
+                NVal("height",300.);
+                List("data", 
+                    [ [ 
+                        Val("name","edges"); 
+                        List("values", edges |> List.map (fun x -> writeItem x edgeExtractors));
+                        List("transform", [ [ Val("type","copy"); Val("from","data"); VList("fields",[ "source"; "target" ]) ] ]);
+                      ]; 
+                      [ 
+                        Val("name","nodes"); 
+                        List("values", nodes |> List.map (fun x -> writeItem x nodeExtractors));
+                        List("transform", [ [ Val("type","force"); Val("links","edges"); NVal("linkDistance",50.); NVal("charge",-50.); NVal("iterations",1000.) ] ]);
+                      ]; 
+                    ])
+                List ("marks", [ render connections; bubbles ])
+            ]
+
+        writeObj template
+
 module Demo =
 
     open Json
@@ -378,5 +438,23 @@ module Demo =
         [ for i in 1950 .. 2010 -> { Year = i; Debt = rng.NextDouble(); Pres = if i < 1960 then "Alpha" elif i < 1980 then "Bravo" else "Charlie" } ]
 
     let debt = coloredBar test ((fun x -> x.Year |> string), (fun x -> x.Debt)) (fun x -> x.Pres)
+
+    type Node = { Name:string }
+    let nodes = 
+        [   { Name = "Alpha" };
+            { Name = "Bravo" };
+            { Name = "Charlie"};
+            { Name = "Delta" } ]
+
+    type Edge = { From:int; To:int; Value:int }
+    let edges = 
+        [   { From=0; To=1; Value= 5};
+            { From=0; To=2; Value= 5};
+            { From=0; To=3; Value= 5};
+            { From=1; To=2; Value= 5};
+            { From=1; To=3; Value= 5};
+            { From=2; To=3; Value= 5}; ]
+
+    let graph = force nodes (fun x -> x.Name) edges ((fun x -> x.From |> float), (fun x -> x.To |> float), (fun x -> x.Value |> float))
 
     ignore ()
